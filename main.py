@@ -1,13 +1,14 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request
 import json
 import os
 import re
+import requests
 
 app = Flask(__name__)
 ARQUIVO = 'gastos.json'
-VERIFY_TOKEN = "meu_token_seguro_123"  # Use o mesmo valor que você colocou na plataforma Meta
+VERIFY_TOKEN = "meu_token_seguro_123"  # Mesmo usado no painel da Meta
 
-# -------------------- GESTÃO DE GASTOS --------------------
+# ---------- GESTÃO DE GASTOS ----------
 
 def carregar_gastos():
     if os.path.exists(ARQUIVO):
@@ -19,47 +20,91 @@ def salvar_gastos(gastos):
     with open(ARQUIVO, 'w') as f:
         json.dump(gastos, f, indent=2)
 
-@app.route('/', methods=['GET'])
-def status():
-    return "Bot de finanças rodando!"
-
-@app.route('/gasto', methods=['POST'])
-def registrar_gasto():
-    data = request.json
-    mensagem = data.get('mensagem', '')
-    valor = extrair_valor(mensagem)
-    
-    if valor is None:
-        return jsonify({'resposta': 'Mensagem inválida. Envie algo como "gastei 30 no mercado".'})
-    
-    descricao = mensagem.replace(str(valor), '').strip()
-    gastos = carregar_gastos()
-    gastos.append({'descricao': descricao, 'valor': valor})
-    salvar_gastos(gastos)
-    
-    total = sum(item['valor'] for item in gastos)
-    return jsonify({'resposta': f'Anotado: "{descricao}" por R${valor:.2f}. Total: R${total:.2f}'})
-
 def extrair_valor(texto):
     match = re.search(r'(\d+(?:[.,]\d+)?)', texto)
     if match:
         return float(match.group(1).replace(',', '.'))
     return None
 
-# -------------------- WHATSAPP WEBHOOK VERIFICATION --------------------
+# ---------- WHATSAPP WEBHOOK ----------
 
 @app.route('/webhook', methods=['GET'])
 def verificar_webhook():
     token = request.args.get("hub.verify_token")
     challenge = request.args.get("hub.challenge")
     mode = request.args.get("hub.mode")
-
     if mode and token == VERIFY_TOKEN:
         return challenge, 200
     else:
         return "Erro de verificação", 403
 
-# -------------------- FLASK RUN --------------------
+@app.route('/webhook', methods=['POST'])
+def receber_mensagem():
+    data = request.get_json()
+    if data.get("object") == "whatsapp_business_account":
+        for entry in data.get("entry", []):
+            for change in entry.get("changes", []):
+                value = change.get("value", {})
+                mensagens = value.get("messages", [])
+                if mensagens:
+                    texto = mensagens[0].get("text", {}).get("body")
+                    processar_mensagem(texto)
+    return "OK", 200
+
+
+ACCESS_TOKEN = "EAAKkHLhMDv8BO2ZAxMYkkvkEMmxHvZBmpHgGX3E3WBt2YhfcSMO3cYCVaA6N2PVtVhTg3V9qM0pVHdteGhUL1jx7yg5VcwcjuwIDgwuzFCYqsEFeaSOtMHWai9nojaB8fpiyj0RZCL3WrX57i4Xa7Tnuq9AAkOQJ7ePRhNxIePFZBik1DWQPpCEk4W6qpc41qqG1uqtyEWZBvrDzx7gCOaqPNluC8MBRiNFgZD"
+ID_NUMERO_REMETENTE = "603104219564006"
+
+def processar_mensagem(texto, numero):
+    valor = extrair_valor(texto)
+    if valor is None:
+        enviar_resposta(numero, 'Mensagem inválida. Envie algo como "gastei 30 no mercado".')
+        return
+
+    descricao = texto.replace(str(valor), '').strip()
+    gastos = carregar_gastos()
+    gastos.append({'descricao': descricao, 'valor': valor})
+    salvar_gastos(gastos)
+
+    resposta = f"Ok, os R${valor:.2f} gastos {descricao} foram anotados!"
+    enviar_resposta(numero, resposta)
+# ---------- STATUS ----------
+
+@app.route('/webhook', methods=['POST'])
+def receber_mensagem():
+    data = request.get_json()
+    if data.get("object") == "whatsapp_business_account":
+        for entry in data.get("entry", []):
+            for change in entry.get("changes", []):
+                value = change.get("value", {})
+                mensagens = value.get("messages", [])
+                if mensagens:
+                    texto = mensagens[0].get("text", {}).get("body")
+                    numero = mensagens[0].get("from")  # <- pega o número do remetente
+                    processar_mensagem(texto, numero)
+    return "OK", 200
+
+def enviar_resposta(numero, mensagem):
+    url = f"https://graph.facebook.com/v18.0/{ID_NUMERO_REMETENTE}/messages"
+    headers = {
+        "Authorization": f"Bearer {ACCESS_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": numero,
+        "type": "text",
+        "text": {"body": mensagem}
+    }
+    response = requests.post(url, headers=headers, json=payload)
+    print("Resposta enviada:", response.status_code, response.text)
+
+
+@app.route('/', methods=['GET'])
+def status():
+    return "Bot de finanças rodando!"
+
+# ---------- INICIAR ----------
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
