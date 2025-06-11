@@ -1,9 +1,13 @@
 from flask import Flask, request, jsonify
 import json
 import os
+import re
 
 app = Flask(__name__)
 ARQUIVO = 'gastos.json'
+VERIFY_TOKEN = "meu_token_seguro_123"  # Use o mesmo valor que você colocou na plataforma Meta
+
+# -------------------- GESTÃO DE GASTOS --------------------
 
 def carregar_gastos():
     if os.path.exists(ARQUIVO):
@@ -37,11 +41,25 @@ def registrar_gasto():
     return jsonify({'resposta': f'Anotado: "{descricao}" por R${valor:.2f}. Total: R${total:.2f}'})
 
 def extrair_valor(texto):
-    import re
     match = re.search(r'(\d+(?:[.,]\d+)?)', texto)
     if match:
         return float(match.group(1).replace(',', '.'))
     return None
+
+# -------------------- WHATSAPP WEBHOOK VERIFICATION --------------------
+
+@app.route('/webhook', methods=['GET'])
+def verificar_webhook():
+    token = request.args.get("hub.verify_token")
+    challenge = request.args.get("hub.challenge")
+    mode = request.args.get("hub.mode")
+
+    if mode and token == VERIFY_TOKEN:
+        return challenge, 200
+    else:
+        return "Erro de verificação", 403
+
+# -------------------- FLASK RUN --------------------
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
