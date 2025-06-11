@@ -47,8 +47,10 @@ def receber_mensagem():
                 value = change.get("value", {})
                 mensagens = value.get("messages", [])
                 if mensagens:
-                    texto = mensagens[0].get("text", {}).get("body")
-                    processar_mensagem(texto)
+                    mensagem = mensagens[0]
+                    texto = mensagem.get("text", {}).get("body")
+                    numero = mensagem.get("from")  # ID do remetente que enviou a msg
+                    processar_mensagem(texto, numero)
     return "OK", 200
 
 
@@ -69,20 +71,6 @@ def processar_mensagem(texto, numero):
     resposta = f"Ok, os R${valor:.2f} gastos {descricao} foram anotados!"
     enviar_resposta(numero, resposta)
 # ---------- STATUS ----------
-
-@app.route('/webhook', methods=['POST'])
-def receber_mensagem():
-    data = request.get_json()
-    if data.get("object") == "whatsapp_business_account":
-        for entry in data.get("entry", []):
-            for change in entry.get("changes", []):
-                value = change.get("value", {})
-                mensagens = value.get("messages", [])
-                if mensagens:
-                    texto = mensagens[0].get("text", {}).get("body")
-                    numero = mensagens[0].get("from")  # <- pega o número do remetente
-                    processar_mensagem(texto, numero)
-    return "OK", 200
 
 def enviar_resposta(numero, mensagem):
     url = f"https://graph.facebook.com/v18.0/{ID_NUMERO_REMETENTE}/messages"
